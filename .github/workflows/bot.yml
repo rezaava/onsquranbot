@@ -1,13 +1,16 @@
-name: telegram-bot
+name: bot
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 */5 * * *"
+  push:
+    branches: [main]
 
 concurrency:
   group: telegram-bot
   cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   run:
@@ -18,17 +21,19 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
+          cache: pip
 
-      - run: pip install python-telegram-bot
+      - name: Install requirements
+        run: pip install -r requirements.txt
 
       - name: Run bot for about 5.4 hours
         env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
         run: timeout 19440 python bot.py || true
 
       - name: Restart workflow
         if: always()
         env:
           GH_TOKEN: ${{ secrets.PAT }}
-        run: gh workflow run bot.yml
+        run: gh workflow run bot.yml --repo "${{ github.repository }}" --ref "${{ github.ref_name }}"

@@ -318,7 +318,7 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     items = items[:10]
     text = f"🔎 <b>نتایج «{html.escape(t)}»</b>\n━━━━━━━━━━━━━━\n\n"
     for r in items:
-        snip = html.escape(clean(r["snip"])).replace("«", "<b>").replace("»", "</b>")
+        snip = html.escape(clean(r["snip"])).replace("[[HL]]", "<b>").replace("[[/HL]]", "</b>")
         text += f"▪️ <i>{html.escape(TITLES[r['group_no']])} {fa_digits(r['group_no'])}:{fa_digits(r['item_no'])}</i>\n{snip}\n\n"
     rows, row = [], []
     for r in items:

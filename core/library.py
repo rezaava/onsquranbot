@@ -65,7 +65,7 @@ def search(query, book_slug=None, lang=None, limit=20):
     if not q:
         return []
     sql = ("SELECT b.slug,e.group_no,e.group_title,e.item_no,t.translator,t.lang,"
-           "snippet(texts_fts,0,'«','»','…',12) snip "
+           snippet(texts_fts,0,'[[HL]]','[[/HL]]','…',12)
            "FROM texts_fts JOIN texts t ON t.id=texts_fts.rowid JOIN entries e ON e.id=t.entry_id "
            "JOIN books b ON b.id=e.book_id WHERE texts_fts MATCH ?")
     args = [q]

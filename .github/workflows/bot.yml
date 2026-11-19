@@ -30,10 +30,13 @@ jobs:
       - name: Run bot for about 5.4 hours
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-        run: timeout 19440 python bot.py || true
+        run: |
+          start=$(date +%s)
+          timeout 19440 python bot.py || true
+          echo "ELAPSED=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
 
       - name: Restart workflow
-        if: always()
+        if: env.ELAPSED != '' && env.ELAPSED > 300
         env:
           GH_TOKEN: ${{ secrets.PAT }}
         run: gh workflow run bot.yml --repo "${{ github.repository }}" --ref "${{ github.ref_name }}"

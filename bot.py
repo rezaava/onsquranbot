@@ -127,14 +127,18 @@ def kb_page(n, p, total, m, ctx):
     return KB(rows)
 
 
-def kb_main():
-    return KB([
+def kb_main(admin=False):
+    rows = [
         [B("📖 قرآن کریم", callback_data="sl:0")],
         [B("🔎 جستجو", callback_data="help"), B("🌅 آیه روز", callback_data="d")],
         [B("🎲 آیه تصادفی", callback_data="r"), B("🔖 نشان‌شده‌ها", callback_data="bl")],
         [B("⚙️ تنظیمات ترجمه", callback_data="set")],
         [B("🕌 نهج‌البلاغه · دعاها · زیارت‌ها (به‌زودی)", callback_data="soon")],
-    ])
+    ]
+    if admin:
+        rows.append([B("📊 آمار", callback_data="adm:stats"), B("👥 کاربران", callback_data="adm:users")])
+        rows.append([B("📤 خروجی CSV", callback_data="adm:export")])
+    return KB(rows)
 
 
 MAIN_TEXT = ("╭─── ✦ ───╮\n"
@@ -161,7 +165,7 @@ async def send(update, text, kb):
 
 # ---------- views ----------
 async def v_main(update, ctx):
-    await send(update, MAIN_TEXT, kb_main())
+    await send(update, MAIN_TEXT, kb_main(is_admin(update)))
 
 
 async def v_list(update, ctx, page):
@@ -242,6 +246,10 @@ async def on_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await q.answer()
     p = d.split(":")
     k = p[0]
+    if k == "adm":
+        if not is_admin(update):
+            return
+        return await {"stats": cmd_stats, "users": cmd_users, "export": cmd_export}[p[1]](update, ctx)
     if k == "m":
         await v_main(update, ctx)
     elif k == "sl":
@@ -365,7 +373,7 @@ async def cmd_stats(update, ctx):
     s = stats.summary()
     week = "\n".join(f"{d}: {u} کاربر / {n} درخواست" for d, u, n in s["week"]) or "-"
     top = "\n".join(f"{k}: {v}" for k, v in s["top"]) or "-"
-    await update.message.reply_text(
+    await update.effective_message.reply_text(
         f"📊 آمار بات\n━━━━━━━━━━\n👥 کل کاربران: {s['total']}\n🆕 جدید ۲۴ ساعت: {s['new24']}\n"
         f"🟢 فعال ۲۴ ساعت: {s['active24']}\n📅 فعال ۷ روز: {s['active7d']}\n"
         f"💬 درخواست امروز: {s['today_n']}\n💬 کل درخواست‌ها: {s['total_n']}\n\n"
@@ -379,7 +387,7 @@ async def cmd_users(update, ctx):
     lines = [f"{i}. {html.escape(u['name'] or '-')} "
              f"{'@' + u['username'] if u['username'] else ''} <code>{uid}</code> ({u['n']})"
              for i, (uid, u) in enumerate(lst[:30], 1)]
-    await update.message.reply_text(
+    await update.effective_message.reply_text(
         f"👥 {len(lst)} کاربر (۳۰ آخرین فعال)\n\n" + "\n".join(lines) + "\n\nلیست کامل: /export",
         parse_mode=ParseMode.HTML)
 
@@ -387,7 +395,7 @@ async def cmd_users(update, ctx):
 async def cmd_export(update, ctx):
     if not is_admin(update):
         return
-    await update.message.reply_document(stats.users_csv(), filename="users.csv")
+    await update.effective_message.reply_document(stats.users_csv(), filename="users.csv")
 
 
 async def _flush(app):

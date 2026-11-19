@@ -362,68 +362,41 @@ async def v_nview(update, ctx, gno, p):
 _MF = {}
 
 
-def mf_arts():
-    if "a" not in _MF:
-        arts = []
-        for g in lib.list_groups("mafatih"):
-            for e in lib.get_group("mafatih", g["group_no"], limit=400):
-                fa = " ".join(e["translations"].values())
-                title = clean(fa.split("\n")[0]).strip() or "بدون عنوان"
-                arts.append({"g": g["group_no"], "i": e["item_no"], "title": title, "ar": e["original"] or "", "fa": fa})
-        _MF["a"] = arts
-        _MF["idx"] = {(x["g"], x["i"]): n for n, x in enumerate(arts)}
-    return _MF["a"]
-
-
-def _chunks(txt, n=1500):
-    out, cur = [], ""
-    for ln in txt.split("\n"):
-        ln = ln.strip()
-        if not ln:
-            continue
-        while len(ln) > n:
-            out.append(ln[:n])
-            ln = ln[n:]
-        if cur and len(cur) + len(ln) > n:
-            out.append(cur)
-            cur = ""
-        cur = (cur + "\n" + ln) if cur else ln
-    if cur:
-        out.append(cur)
-    return out
-
-
-def mf_pages(idx):
-    key = ("p", idx)
+def mf_pages(gno):
+    key = ("g", gno)
     if key in _MF:
         return _MF[key]
-    art = mf_arts()[idx]
-    blocks = []
-    fa_lines = art["fa"].split("\n", 1)
-    fa_body = fa_lines[1] if len(fa_lines) > 1 else ""
-    for c in _chunks(clean(art["ar"])):
-        blocks.append(f"<b>{html.escape(c)}</b>")
-    for c in _chunks(clean(fa_body)):
-        blocks.append(f"<blockquote>{html.escape(c)}</blockquote>")
+    entries = lib.get_group("mafatih", gno, limit=500)
     pages, cur, size = [], [], 0
-    for bl in blocks:
+    for e in entries:
+        ar = clean(e["original"] or "").strip()
+        fa = clean(" ".join(e["translations"].values())).strip()
+        bl = ""
+        if ar:
+            bl += f"<b>{html.escape(ar)}</b>\n"
+        if fa:
+            bl += f"<blockquote>{html.escape(fa)}</blockquote>\n"
         if cur and size + len(bl) > 3000:
-            pages.append("\n".join(cur))
+            pages.append("".join(cur))
             cur, size = [], 0
         cur.append(bl)
         size += len(bl)
     if cur:
-        pages.append("\n".join(cur))
+        pages.append("".join(cur))
     _MF[key] = pages or ["—"]
     return _MF[key]
 
 
 async def v_mflist(update, ctx, page):
-    arts = mf_arts()
-    per = 10
-    total = (len(arts) + per - 1) // per
+    secs = lib.list_groups("mafatih")
+    per = 15
+    total = (len(secs) + per - 1) // per
     page = max(0, min(page, total - 1))
-    rows = [[B(x["title"][:60], callback_data=f"mv:{n}:0")] for n, x in enumerate(arts[page * per:(page + 1) * per], page * per)]
+    chunk = secs[page * per:(page + 1) * per]
+    rows = []
+    for x in chunk:
+        title = x["group_title"].split("·")[-1].strip() or f"بخش {x['group_no']}"
+        rows.append([B(title[:60], callback_data=f"mv:{x['group_no']}:0")])
     nav = []
     if page > 0:
         nav.append(B("◀️", callback_data=f"mf:{page-1}"))
@@ -434,27 +407,29 @@ async def v_mflist(update, ctx, page):
     await send(update, "🤲 <b>مفاتیح‌الجنان</b>\nیکی را انتخاب کنید:", KB(rows))
 
 
-async def v_mfview(update, ctx, idx, p):
-    arts = mf_arts()
-    if not 0 <= idx < len(arts):
+async def v_mfview(update, ctx, gno, p):
+    secs = lib.list_groups("mafatih")
+    sec = next((x for x in secs if x["group_no"] == gno), None)
+    if not sec:
         return await v_mflist(update, ctx, 0)
-    pg = mf_pages(idx)
+    pg = mf_pages(gno)
     p = max(0, min(p, len(pg) - 1))
-    s = f"🤲 <b>{html.escape(arts[idx]['title'])}</b> · {fa_digits(p+1)}/{fa_digits(len(pg))}\n━━━━━━━━━━━━━━\n\n{pg[p]}"
+    title = sec["group_title"].split("·")[-1].strip() or f"بخش {gno}"
+    s = f"🤲 <b>{html.escape(title)}</b> · {fa_digits(p+1)}/{fa_digits(len(pg))}\n━━━━━━━━━━━━━━\n\n{pg[p]}"
     nav = []
     if p > 0:
-        nav.append(B("◀️ قبلی", callback_data=f"mv:{idx}:{p-1}"))
+        nav.append(B("◀️ قبلی", callback_data=f"mv:{gno}:{p-1}"))
     if p < len(pg) - 1:
-        nav.append(B("بعدی ▶️", callback_data=f"mv:{idx}:{p+1}"))
+        nav.append(B("بعدی ▶️", callback_data=f"mv:{gno}:{p+1}"))
     rows = [nav] if nav else []
     pn = []
-    if idx > 0:
-        pn.append(B("⏮ دعای قبل", callback_data=f"mv:{idx-1}:0"))
-    if idx < len(arts) - 1:
-        pn.append(B("دعای بعد ⏭", callback_data=f"mv:{idx+1}:0"))
+    if gno > 1:
+        pn.append(B("⏮ بخش قبل", callback_data=f"mv:{gno-1}:0"))
+    if gno < len(secs):
+        pn.append(B("بخش بعد ⏭", callback_data=f"mv:{gno+1}:0"))
     if pn:
         rows.append(pn)
-    rows.append([B("📚 فهرست", callback_data=f"mf:{idx//10}"), B("🏠 منو", callback_data="m")])
+    rows.append([B("📚 فهرست", callback_data=f"mf:{(gno-1)//15}"), B("🏠 منو", callback_data="m")])
     await send(update, s, KB(rows))
 
 
@@ -613,16 +588,11 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if row:
             rows.append(row)
     if mi:
-        mf_arts()
         text += "🤲 <b>مفاتیح‌الجنان</b>\n"
-        row = []
         for r in mi:
-            n = _MF["idx"].get((r["group_no"], r["item_no"]))
-            if n is None:
-                continue
-            ti = _MF["a"][n]["title"]
+            ti = r["group_title"].split("·")[-1].strip() or f"بخش {r['group_no']}"
             text += f"▪️ <i>{html.escape(ti[:60])}</i>\n{hl(r)}\n\n"
-            rows.append([B(f"🤲 {ti[:50]}", callback_data=f"mv:{n}:0")])
+            rows.append([B(f"🤲 {ti[:50]}", callback_data=f"mv:{r['group_no']}:0")])
     rows.append([B("🏠 منو", callback_data="m")])
     await update.message.reply_text(text[:4000], reply_markup=KB(rows), parse_mode=ParseMode.HTML)
 

@@ -141,7 +141,8 @@ def kb_main(admin=False):
         [B("🔎 جستجو", callback_data="help"), B("🌅 آیه روز", callback_data="d")],
         [B("🎲 آیه تصادفی", callback_data="r"), B("🔖 نشان‌شده‌ها", callback_data="bl")],
         [B("⚙️ تنظیمات ترجمه", callback_data="set")],
-        [B("🕌 نهج‌البلاغه · دعاها · زیارت‌ها (به‌زودی)", callback_data="soon")],
+        [B("📜 نهج‌البلاغه", callback_data="nh")],
+        [B("🕌 دعاها · زیارت‌ها (به‌زودی)", callback_data="soon")],
     ]
     if admin:
         rows.append([B("📊 آمار", callback_data="adm:stats"), B("👥 کاربران", callback_data="adm:users")])
@@ -273,6 +274,89 @@ async def v_settings(update, ctx):
 
 
 # ---------- handlers ----------
+# ---------- Nahj al-Balagha ----------
+NH_TYPES = {0: ("خطبه‌ها", "خطبه", 0, 241), 1: ("نامه‌ها", "نامه", 1000, 79), 2: ("حکمت‌ها", "حکمت", 2000, 24)}
+_nh_cache = {}
+
+
+def nh_pages(gno):
+    if gno in _nh_cache:
+        return _nh_cache[gno]
+    out, cur, size = [], [], 0
+    for e in lib.get_group("nahj", gno, limit=400):
+        sz = len(e["original"] or "") + sum(len(t) for t in e["translations"].values())
+        if cur and size + sz > 2800:
+            out.append(cur)
+            cur, size = [], 0
+        cur.append(e)
+        size += sz
+    if cur:
+        out.append(cur)
+    _nh_cache[gno] = out
+    return out
+
+
+def nh_type(gno):
+    return 2 if gno > 2000 else 1 if gno > 1000 else 0
+
+
+async def v_nahj(update, ctx):
+    rows = [[B(f"📜 {NH_TYPES[t][0]}", callback_data=f"nl:{t}:0")] for t in (0, 1, 2)]
+    rows.append([B("🏠 منو", callback_data="m")])
+    await send(update, "📜 <b>نهج‌البلاغه</b>\nگردآوری سید رضی\n\nیک بخش را انتخاب کنید:", KB(rows))
+
+
+async def v_nlist(update, ctx, t, page):
+    name, word, base, cnt = NH_TYPES[t]
+    per = 30
+    total = (cnt + per - 1) // per
+    page = max(0, min(page, total - 1))
+    nums = list(range(page * per + 1, min(cnt, (page + 1) * per) + 1))
+    rows = []
+    for i in range(0, len(nums), 5):
+        rows.append([B(fa_digits(n), callback_data=f"nv:{base+n}:0") for n in nums[i:i+5]])
+    nav = []
+    if page > 0:
+        nav.append(B("◀️", callback_data=f"nl:{t}:{page-1}"))
+    nav.append(B(f"{fa_digits(page+1)}/{fa_digits(total)}", callback_data="noop"))
+    if page < total - 1:
+        nav.append(B("▶️", callback_data=f"nl:{t}:{page+1}"))
+    rows += [nav, [B("📜 نهج‌البلاغه", callback_data="nh"), B("🏠 منو", callback_data="m")]]
+    what = "بخش" if t == 2 else word
+    extra = "\n(هر بخش حکمت شامل حدود ۲۵ حکمت است)" if t == 2 else ""
+    await send(update, f"📜 <b>{name} نهج‌البلاغه</b>\nشماره {what} را انتخاب کنید:{extra}", KB(rows))
+
+
+async def v_nview(update, ctx, gno, p):
+    pg = nh_pages(gno)
+    if not pg:
+        return await v_nahj(update, ctx)
+    p = max(0, min(p, len(pg) - 1))
+    t = nh_type(gno)
+    name, word, base, cnt = NH_TYPES[t]
+    num = gno - base
+    title = f"حکمت‌ها · بخش {fa_digits(num)}" if t == 2 else f"{word} {fa_digits(num)}"
+    s = f"📜 <b>{title}</b> · صفحه {fa_digits(p+1)} از {fa_digits(len(pg))}\n━━━━━━━━━━━━━━\n\n"
+    for e in pg[p]:
+        ar = html.escape(clean(e["original"] or ""))
+        fa = html.escape(clean(" ".join(e["translations"].values())))
+        s += f"<b>{ar}</b>\n<blockquote>{fa}</blockquote>\n"
+    s = s[:4000]
+    nav = []
+    if p > 0:
+        nav.append(B("◀️ قبلی", callback_data=f"nv:{gno}:{p-1}"))
+    nav.append(B(f"{fa_digits(p+1)}/{fa_digits(len(pg))}", callback_data="noop"))
+    if p < len(pg) - 1:
+        nav.append(B("بعدی ▶️", callback_data=f"nv:{gno}:{p+1}"))
+    ns = []
+    if num > 1:
+        ns.append(B(f"⏮ {word} قبل", callback_data=f"nv:{gno-1}:0"))
+    if num < cnt:
+        ns.append(B(f"{word} بعد ⏭", callback_data=f"nv:{gno+1}:0"))
+    rows = [nav, ns, [B("📚 فهرست", callback_data=f"nl:{t}:{(num-1)//30}"), B("🏠 منو", callback_data="m")]]
+    await send(update, s, KB([r for r in rows if r]))
+
+
 async def on_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     d = q.data
@@ -283,6 +367,17 @@ async def on_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not is_admin(update):
             return
         return await {"stats": cmd_stats, "users": cmd_users, "export": cmd_export}[p[1]](update, ctx)
+    if k == "nh":
+        return await v_nahj(update, ctx)
+    if k == "nj":
+        g, it = int(p[1]), int(p[2])
+        pg = nh_pages(g)
+        idx = next((i for i, x in enumerate(pg) if any(e["item_no"] == it for e in x)), 0)
+        return await v_nview(update, ctx, g, idx)
+    if k == "nl":
+        return await v_nlist(update, ctx, int(p[1]), int(p[2]))
+    if k == "nv":
+        return await v_nview(update, ctx, int(p[1]), int(p[2]))
     if k == "au":
         n, a = int(p[1]), int(p[2])
         try:
@@ -363,31 +458,56 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             rows = [[B(f"📖 سوره {TITLES[n]}", callback_data=f"s:{n}:0")] for n in hits]
             rows.append([B("🏠 منو", callback_data="m")])
             return await update.message.reply_text("📚 سوره‌های یافت‌شده:", reply_markup=KB(rows))
-    res = lib.search(t, "quran", limit=40)
-    if not res:
+    def uniq(res, n):
+        seen, out = set(), []
+        for r in res:
+            key = (r["group_no"], r["item_no"])
+            if key not in seen:
+                seen.add(key)
+                out.append(r)
+        return out[:n]
+
+    qi = uniq(lib.search(t, "quran", limit=40), 7)
+    ni = uniq(lib.search(t, "nahj", limit=40), 5)
+    if not qi and not ni:
         return await update.message.reply_text("🔍 نتیجه‌ای پیدا نشد. کلمه‌ی دیگری امتحان کنید.",
                                                reply_markup=KB([[B("🏠 منو", callback_data="m")]]))
-    seen, items = set(), []
-    for r in res:
-        key = (r["group_no"], r["item_no"])
-        if key not in seen:
-            seen.add(key)
-            items.append(r)
-    items = items[:10]
+
+    def hl(r):
+        return html.escape(clean(r["snip"])).replace("[[HL]]", "<b>").replace("[[/HL]]", "</b>")
+
+    def nlabel(r):
+        if r["group_no"] > 2000:
+            return f"حکمت {fa_digits(r['item_no'])}"
+        return fa_digits(clean(r["group_title"]))
+
     text = f"🔎 <b>نتایج «{html.escape(t)}»</b>\n━━━━━━━━━━━━━━\n\n"
-    for r in items:
-        snip = html.escape(clean(r["snip"])).replace("[[HL]]", "<b>").replace("[[/HL]]", "</b>")
-        text += f"▪️ <i>{html.escape(TITLES[r['group_no']])} {fa_digits(r['group_no'])}:{fa_digits(r['item_no'])}</i>\n{snip}\n\n"
-    rows, row = [], []
-    for r in items:
-        row.append(B(f"{fa_digits(r['group_no'])}:{fa_digits(r['item_no'])}", callback_data=f"a:{r['group_no']}:{r['item_no']}"))
-        if len(row) == 3:
+    rows = []
+    if qi:
+        text += "📖 <b>قرآن</b>\n"
+        row = []
+        for r in qi:
+            text += f"▪️ <i>{html.escape(TITLES[r['group_no']])} {fa_digits(r['group_no'])}:{fa_digits(r['item_no'])}</i>\n{hl(r)}\n\n"
+            row.append(B(f"{fa_digits(r['group_no'])}:{fa_digits(r['item_no'])}", callback_data=f"a:{r['group_no']}:{r['item_no']}"))
+            if len(row) == 3:
+                rows.append(row)
+                row = []
+        if row:
             rows.append(row)
-            row = []
-    if row:
-        rows.append(row)
+    if ni:
+        text += "📜 <b>نهج‌البلاغه</b>\n"
+        row = []
+        for r in ni:
+            lb = nlabel(r)
+            text += f"▪️ <i>{html.escape(lb)}</i>\n{hl(r)}\n\n"
+            row.append(B(f"📜 {lb}", callback_data=f"nj:{r['group_no']}:{r['item_no']}"))
+            if len(row) == 2:
+                rows.append(row)
+                row = []
+        if row:
+            rows.append(row)
     rows.append([B("🏠 منو", callback_data="m")])
-    await update.message.reply_text(text, reply_markup=KB(rows), parse_mode=ParseMode.HTML)
+    await update.message.reply_text(text[:4000], reply_markup=KB(rows), parse_mode=ParseMode.HTML)
 
 
 async def cmd_start(update, ctx):

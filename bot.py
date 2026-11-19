@@ -8,10 +8,11 @@ import re
 
 from telegram import InlineKeyboardButton as B, InlineKeyboardMarkup as KB, Update
 from telegram.constants import ParseMode
-from telegram.ext import (Application, CallbackQueryHandler, CommandHandler, ContextTypes,
+from telegram.ext import (Application, TypeHandler, CallbackQueryHandler, CommandHandler, ContextTypes,
                           MessageHandler, PersistenceInput, PicklePersistence, filters)
 
 from core import library as lib
+import stats
 
 logging.basicConfig(level=logging.INFO)
 
@@ -336,16 +337,80 @@ async def cmd_start(update, ctx):
     await v_main(update, ctx)
 
 
+ADMINS = {int(x) for x in re.findall(r"\d+", os.environ.get("ADMIN_ID", ""))}
+
+
+async def track(update: Update, ctx):
+    if update.callback_query:
+        ev = "btn:" + (update.callback_query.data or "").split(":")[0]
+    elif update.message and update.message.text:
+        t = update.message.text
+        ev = "cmd:" + t.split()[0].lstrip("/").split("@")[0] if t.startswith("/") else "text"
+    else:
+        return
+    stats.record(update.effective_user, ev)
+
+
+def is_admin(update):
+    return update.effective_user and update.effective_user.id in ADMINS
+
+
+async def cmd_myid(update, ctx):
+    await update.message.reply_text(f"آیدی عددی شما: {update.effective_user.id}")
+
+
+async def cmd_stats(update, ctx):
+    if not is_admin(update):
+        return
+    s = stats.summary()
+    week = "\n".join(f"{d}: {u} کاربر / {n} درخواست" for d, u, n in s["week"]) or "-"
+    top = "\n".join(f"{k}: {v}" for k, v in s["top"]) or "-"
+    await update.message.reply_text(
+        f"📊 آمار بات\n━━━━━━━━━━\n👥 کل کاربران: {s['total']}\n🆕 جدید ۲۴ ساعت: {s['new24']}\n"
+        f"🟢 فعال ۲۴ ساعت: {s['active24']}\n📅 فعال ۷ روز: {s['active7d']}\n"
+        f"💬 درخواست امروز: {s['today_n']}\n💬 کل درخواست‌ها: {s['total_n']}\n\n"
+        f"۷ روز اخیر (UTC):\n{week}\n\nپرکاربردترین‌ها:\n{top}")
+
+
+async def cmd_users(update, ctx):
+    if not is_admin(update):
+        return
+    lst = stats.users_list()
+    lines = [f"{i}. {html.escape(u['name'] or '-')} "
+             f"{'@' + u['username'] if u['username'] else ''} <code>{uid}</code> ({u['n']})"
+             for i, (uid, u) in enumerate(lst[:30], 1)]
+    await update.message.reply_text(
+        f"👥 {len(lst)} کاربر (۳۰ آخرین فعال)\n\n" + "\n".join(lines) + "\n\nلیست کامل: /export",
+        parse_mode=ParseMode.HTML)
+
+
+async def cmd_export(update, ctx):
+    if not is_admin(update):
+        return
+    await update.message.reply_document(stats.users_csv(), filename="users.csv")
+
+
+async def _flush(app):
+    stats.save(force=True)
+
+
 def main():
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
         raise SystemExit("متغیر TELEGRAM_BOT_TOKEN را تنظیم کنید (توکن را از @BotFather بگیرید).")
     load()
-    os.makedirs("data", exist_ok=True)
+    stats.load()
+    os.makedirs(stats.STATE_DIR, exist_ok=True)
     app = (Application.builder().token(token)
-           .persistence(PicklePersistence("data/users.pickle",
+           .persistence(PicklePersistence(os.path.join(stats.STATE_DIR, "users.pickle"),
                                           store_data=PersistenceInput(bot_data=False, chat_data=False, callback_data=False)))
+           .post_shutdown(_flush)
            .build())
+    app.add_handler(TypeHandler(Update, track), group=-1)
+    app.add_handler(CommandHandler("myid", cmd_myid))
+    app.add_handler(CommandHandler("stats", cmd_stats))
+    app.add_handler(CommandHandler("users", cmd_users))
+    app.add_handler(CommandHandler("export", cmd_export))
     app.add_handler(CommandHandler(["start", "menu"], cmd_start))
     app.add_handler(CallbackQueryHandler(on_cb))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))

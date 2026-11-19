@@ -15,6 +15,7 @@ from core import library as lib
 import stats
 
 logging.basicConfig(level=logging.INFO)
+log = logging.getLogger(__name__)
 
 # ---------- data cache ----------
 SURAS = {}      # n -> list of entries
@@ -210,6 +211,7 @@ async def v_ayah(update, ctx, n, a):
     kb = KB([nav,
              [B("⭐ حذف نشان" if saved else "🔖 نشان‌کردن", callback_data=f"ba:{n}:{a}"),
               B("📖 خواندن سوره", callback_data=f"s:{n}:{page_of(n, a, m)}")],
+             [B("🔊 شنیدن آیه", callback_data=f"au:{n}:{a}")],
              [B("🏠 منو", callback_data="m")]])
     await send(update, text, kb)
 
@@ -250,6 +252,15 @@ async def on_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not is_admin(update):
             return
         return await {"stats": cmd_stats, "users": cmd_users, "export": cmd_export}[p[1]](update, ctx)
+    if k == "au":
+        n, a = int(p[1]), int(p[2])
+        url = f"https://everyayah.com/data/Alafasy_128kbps/{n:03d}{a:03d}.mp3"
+        try:
+            await q.message.reply_audio(url, title=f"{TITLES[n]} - آیه {a}", performer="مشاری العفاسی")
+        except Exception:
+            log.exception("audio failed")
+            await q.message.reply_text("❌ ارسال صوت ممکن نشد.")
+        return
     if k == "m":
         await v_main(update, ctx)
     elif k == "sl":

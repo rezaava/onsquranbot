@@ -142,7 +142,8 @@ def kb_main(admin=False):
         [B("🎲 آیه تصادفی", callback_data="r"), B("🔖 نشان‌شده‌ها", callback_data="bl")],
         [B("⚙️ تنظیمات ترجمه", callback_data="set")],
         [B("📜 نهج‌البلاغه", callback_data="nh")],
-        [B("🕌 دعاها · زیارت‌ها (به‌زودی)", callback_data="soon")],
+        [B("🤲 مفاتیح‌الجنان", callback_data="mf:0")],
+        [B("🕌 زیارت‌ها (به‌زودی)", callback_data="soon")],
     ]
     if admin:
         rows.append([B("📊 آمار", callback_data="adm:stats"), B("👥 کاربران", callback_data="adm:users")])
@@ -357,6 +358,71 @@ async def v_nview(update, ctx, gno, p):
     await send(update, s, KB([r for r in rows if r]))
 
 
+# ---------- Mafatih al-Jinan ----------
+_mf_cache = {}
+
+
+def mf_pages(gno):
+    if gno in _mf_cache:
+        return _mf_cache[gno]
+    items = []
+    for e in lib.get_group("mafatih", gno, limit=400):
+        items.append(e)
+    out, cur, size = [], [], 0
+    for e in items:
+        sz = len(e["original"] or "") + sum(len(t) for t in e["translations"].values())
+        if cur and size + sz > 2800:
+            out.append(cur)
+            cur, size = [], 0
+        cur.append(e)
+        size += sz
+    if cur:
+        out.append(cur)
+    _mf_cache[gno] = out
+    return out
+
+
+async def v_mflist(update, ctx, page):
+    secs = lib.list_groups("mafatih")
+    per = 15
+    total = (len(secs) + per - 1) // per
+    page = max(0, min(page, total - 1))
+    chunk = secs[page * per:(page + 1) * per]
+    rows = []
+    for i in range(0, len(chunk), 3):
+        rows.append([B(f"{fa_digits(x['group_no'])}", callback_data=f"mv:{x['group_no']}:0") for x in chunk[i:i+3]])
+    nav = []
+    if page > 0:
+        nav.append(B("◀️", callback_data=f"mf:{page-1}"))
+    nav.append(B(f"{fa_digits(page+1)}/{fa_digits(total)}", callback_data="noop"))
+    if page < total - 1:
+        nav.append(B("▶️", callback_data=f"mf:{page+1}"))
+    rows += [nav, [B("🏠 منو", callback_data="m")]]
+    await send(update, "🤲 <b>مفاتیح‌الجنان</b>\nبخش‌ها (فصل‌ها) را انتخاب کنید:", KB(rows))
+
+
+async def v_mfview(update, ctx, gno, p):
+    pg = mf_pages(gno)
+    if not pg:
+        return await v_mflist(update, ctx, 0)
+    p = max(0, min(p, len(pg) - 1))
+    title = pg[p][0]["group_title"]
+    s = f"🤲 <b>{html.escape(clean(title))}</b> · صفحه {fa_digits(p+1)} از {fa_digits(len(pg))}\n━━━━━━━━━━━━━━\n\n"
+    for e in pg[p]:
+        ar = html.escape(clean(e["original"] or ""))
+        fa = html.escape(clean(" ".join(e["translations"].values())))
+        s += f"<b>{ar}</b>\n<blockquote>{fa}</blockquote>\n"
+    s = s[:4000]
+    nav = []
+    if p > 0:
+        nav.append(B("◀️ قبلی", callback_data=f"mv:{gno}:{p-1}"))
+    nav.append(B(f"{fa_digits(p+1)}/{fa_digits(len(pg))}", callback_data="noop"))
+    if p < len(pg) - 1:
+        nav.append(B("بعدی ▶️", callback_data=f"mv:{gno}:{p+1}"))
+    rows = [nav, [B("📚 فهرست بخش‌ها", callback_data=f"mf:{(gno-1)//15}"), B("🏠 منو", callback_data="m")]]
+    await send(update, s, KB([r for r in rows if r]))
+
+
 async def on_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     d = q.data
@@ -374,6 +440,10 @@ async def on_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         pg = nh_pages(g)
         idx = next((i for i, x in enumerate(pg) if any(e["item_no"] == it for e in x)), 0)
         return await v_nview(update, ctx, g, idx)
+    if k == "mf":
+        return await v_mflist(update, ctx, int(p[1]))
+    if k == "mv":
+        return await v_mfview(update, ctx, int(p[1]), int(p[2]))
     if k == "nl":
         return await v_nlist(update, ctx, int(p[1]), int(p[2]))
     if k == "nv":
@@ -469,7 +539,8 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     qi = uniq(lib.search(t, "quran", limit=40), 7)
     ni = uniq(lib.search(t, "nahj", limit=40), 5)
-    if not qi and not ni:
+    mi = uniq(lib.search(t, "mafatih", limit=40), 4)
+    if not qi and not ni and not mi:
         return await update.message.reply_text("🔍 نتیجه‌ای پیدا نشد. کلمه‌ی دیگری امتحان کنید.",
                                                reply_markup=KB([[B("🏠 منو", callback_data="m")]]))
 
@@ -501,6 +572,17 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             lb = nlabel(r)
             text += f"▪️ <i>{html.escape(lb)}</i>\n{hl(r)}\n\n"
             row.append(B(f"📜 {lb}", callback_data=f"nj:{r['group_no']}:{r['item_no']}"))
+            if len(row) == 2:
+                rows.append(row)
+                row = []
+        if row:
+            rows.append(row)
+    if mi:
+        text += "🤲 <b>مفاتیح‌الجنان</b>\n"
+        row = []
+        for r in mi:
+            text += f"▪️ <i>{html.escape(clean(r['group_title'])[:80])}</i>\n{hl(r)}\n\n"
+            row.append(B(f"🤲 بخش {fa_digits(r['group_no'])}", callback_data=f"mv:{r['group_no']}:0"))
             if len(row) == 2:
                 rows.append(row)
                 row = []

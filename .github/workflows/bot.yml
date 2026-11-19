@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   run:
@@ -27,13 +27,29 @@ jobs:
       - name: Install requirements
         run: pip install -r requirements.txt
 
+      - name: Restore saved state
+        run: |
+          mkdir -p state
+          git fetch --depth=1 origin state && git archive FETCH_HEAD | tar -x -C state || true
+
       - name: Run bot for about 5.4 hours
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          ADMIN_ID: ${{ secrets.ADMIN_ID }}
+          STATE_DIR: state
         run: |
           start=$(date +%s)
           timeout 19440 python bot.py || true
           echo "ELAPSED=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
+
+      - name: Save state
+        if: always()
+        run: |
+          cd state
+          git init -q -b state
+          git config user.name bot && git config user.email bot@users.noreply.github.com
+          git add -A && git commit -qm "state" || exit 0
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" state
 
       - name: Restart workflow
         if: env.ELAPSED != '' && env.ELAPSED > 300

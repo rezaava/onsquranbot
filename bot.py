@@ -171,14 +171,28 @@ async def send(update, text, kb):
         await update.effective_message.reply_text(**kw)
 
 
-def ayah_ogg(n, a):
-    """Download the mp3 and convert it to ogg/opus so Telegram plays it inline as a voice message."""
-    url = f"https://everyayah.com/data/Alafasy_128kbps/{n:03d}{a:03d}.mp3"
-    mp3 = urllib.request.urlopen(url, timeout=30).read()
-    proc = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", "pipe:0",
-                           "-c:a", "libopus", "-b:a", "48k", "-f", "ogg", "pipe:1"],
-                          input=mp3, capture_output=True, check=True)
-    return proc.stdout
+def ayah_audio(n, a):
+    """Return (bytes, is_voice). Tries ogg/opus voice; falls back to the raw mp3."""
+    mp3 = None
+    err = None
+    for host in ("everyayah.com", "www.everyayah.com"):
+        try:
+            req = urllib.request.Request(f"https://{host}/data/Alafasy_128kbps/{n:03d}{a:03d}.mp3",
+                                         headers={"User-Agent": "Mozilla/5.0"})
+            mp3 = urllib.request.urlopen(req, timeout=30).read()
+            break
+        except Exception as ex:
+            err = ex
+    if mp3 is None:
+        raise err
+    try:
+        proc = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", "pipe:0",
+                               "-c:a", "libopus", "-b:a", "48k", "-f", "ogg", "pipe:1"],
+                              input=mp3, capture_output=True, check=True)
+        return proc.stdout, True
+    except Exception:
+        log.exception("ffmpeg failed, sending mp3")
+        return mp3, False
 
 
 # ---------- views ----------
@@ -272,13 +286,18 @@ async def on_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if k == "au":
         n, a = int(p[1]), int(p[2])
         try:
-            ogg = await asyncio.to_thread(ayah_ogg, n, a)
-            voice = io.BytesIO(ogg)
-            voice.name = f"{n:03d}{a:03d}.ogg"
-            await q.message.reply_voice(voice, caption=f"{TITLES[n]} · آیه {fa_digits(a)}")
-        except Exception:
+            data, is_voice = await asyncio.to_thread(ayah_audio, n, a)
+            f = io.BytesIO(data)
+            cap = f"{TITLES[n]} · آیه {fa_digits(a)}"
+            if is_voice:
+                f.name = f"{n:03d}{a:03d}.ogg"
+                await q.message.reply_voice(f, caption=cap)
+            else:
+                f.name = f"{n:03d}{a:03d}.mp3"
+                await q.message.reply_audio(f, title=cap, performer="مشاری العفاسی")
+        except Exception as ex:
             log.exception("audio failed")
-            await q.message.reply_text("❌ ارسال صوت ممکن نشد.")
+            await q.message.reply_text(f"❌ ارسال صوت ممکن نشد.\n{type(ex).__name__}: {ex}"[:300])
         return
     if k == "m":
         await v_main(update, ctx)

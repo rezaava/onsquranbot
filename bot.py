@@ -1,10 +1,14 @@
 """Telegram bot UI. Run:  TELEGRAM_BOT_TOKEN=xxx python3 bot.py"""
+import asyncio
 import datetime
 import html
+import io
 import logging
 import os
 import random
 import re
+import subprocess
+import urllib.request
 
 from telegram import InlineKeyboardButton as B, InlineKeyboardMarkup as KB, Update
 from telegram.constants import ParseMode
@@ -116,6 +120,9 @@ def kb_page(n, p, total, m, ctx):
     if p < total - 1:
         nav.append(B("بعدی ▶️", callback_data=f"s:{n}:{p+1}"))
     rows = [nav]
+    ayahs = [e["item_no"] for e in pages(n, m)[p]]
+    for i in range(0, len(ayahs), 5):
+        rows.append([B(f"🔊 {fa_digits(a)}", callback_data=f"au:{n}:{a}") for a in ayahs[i:i+5]])
     rows.append([B("⭐ حذف نشان" if saved else "🔖 نشان‌کردن", callback_data=f"b:{n}:{first}:{p}"),
                  B(f"🌐 {TR_MODES[m][0]}", callback_data=f"c:{n}:{p}")])
     ns = []
@@ -162,6 +169,16 @@ async def send(update, text, kb):
                 raise
     else:
         await update.effective_message.reply_text(**kw)
+
+
+def ayah_ogg(n, a):
+    """Download the mp3 and convert it to ogg/opus so Telegram plays it inline as a voice message."""
+    url = f"https://everyayah.com/data/Alafasy_128kbps/{n:03d}{a:03d}.mp3"
+    mp3 = urllib.request.urlopen(url, timeout=30).read()
+    proc = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", "pipe:0",
+                           "-c:a", "libopus", "-b:a", "48k", "-f", "ogg", "pipe:1"],
+                          input=mp3, capture_output=True, check=True)
+    return proc.stdout
 
 
 # ---------- views ----------
@@ -254,9 +271,11 @@ async def on_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return await {"stats": cmd_stats, "users": cmd_users, "export": cmd_export}[p[1]](update, ctx)
     if k == "au":
         n, a = int(p[1]), int(p[2])
-        url = f"https://everyayah.com/data/Alafasy_128kbps/{n:03d}{a:03d}.mp3"
         try:
-            await q.message.reply_audio(url, title=f"{TITLES[n]} - آیه {a}", performer="مشاری العفاسی")
+            ogg = await asyncio.to_thread(ayah_ogg, n, a)
+            voice = io.BytesIO(ogg)
+            voice.name = f"{n:03d}{a:03d}.ogg"
+            await q.message.reply_voice(voice, caption=f"{TITLES[n]} · آیه {fa_digits(a)}")
         except Exception:
             log.exception("audio failed")
             await q.message.reply_text("❌ ارسال صوت ممکن نشد.")

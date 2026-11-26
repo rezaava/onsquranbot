@@ -6,9 +6,14 @@ from . import db
 _AR_DIAC = re.compile(r"[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED\u0640]")
 
 
+_MAP = str.maketrans({"ي": "ی", "ى": "ی", "ئ": "ی", "ك": "ک", "ٱ": "ا", "أ": "ا", "إ": "ا", "آ": "ا",
+                      "ؤ": "و", "ة": "ه", "ۀ": "ه", "ء": "", "\u200c": " ", "\u200d": ""})
+
+
 def normalize(s: str) -> str:
-    s = _AR_DIAC.sub("", s)
-    return s.replace("ي", "ی").replace("ك", "ک").replace("ٱ", "ا")
+    """Skeleton form: no harakat, unified Arabic/Persian letters (ة=ه, ي=ی, أإآ=ا ...)."""
+    s = _AR_DIAC.sub("", s or "")
+    return s.translate(_MAP)
 
 
 def list_books(category=None):
@@ -61,13 +66,16 @@ def get_group(book_slug, group_no, offset=0, limit=10, translators=None):
 def search(query, book_slug=None, lang=None, limit=20):
     """Full-text search over all books (or one)."""
     con = db.connect()
-    q = " ".join(f'"{w}"' for w in normalize(query).split())
-    if not q:
+    ws = [w for w in re.findall(r"\w+", normalize(query)) if w]
+    if not ws:
         return []
+    q = " ".join(f'"{w}"' for w in ws[:-1] + [ws[-1]]) 
+    q = q + "*" if q.endswith('"') else q
+    q = q[:-2] + '"*' if q.endswith('""*') else q
     sql = ("SELECT b.slug,e.group_no,e.group_title,e.item_no,t.translator,t.lang,"
-           "snippet(texts_fts,0,'[[HL]]','[[/HL]]','…',12) snip "
-           "FROM texts_fts JOIN texts t ON t.id=texts_fts.rowid JOIN entries e ON e.id=t.entry_id "
-           "JOIN books b ON b.id=e.book_id WHERE texts_fts MATCH ?")
+           "snippet(nfts,0,'[[HL]]','[[/HL]]','…',12) snip "
+           "FROM nfts JOIN texts t ON t.id=nfts.rowid JOIN entries e ON e.id=t.entry_id "
+           "JOIN books b ON b.id=e.book_id WHERE nfts MATCH ?")
     args = [q]
     if book_slug:
         sql, args = sql + " AND b.slug=?", args + [book_slug]

@@ -67,5 +67,10 @@ def add_text(con, entry_id, kind, lang, body, translator=""):
 
 
 def rebuild_fts(con):
+    from core.library import normalize
     con.execute("INSERT INTO texts_fts(texts_fts) VALUES('rebuild')")
+    con.execute("DROP TABLE IF EXISTS nfts")
+    con.execute("CREATE VIRTUAL TABLE nfts USING fts5(body, tokenize='unicode61 remove_diacritics 2')")
+    rows = con.execute("SELECT id, body FROM texts").fetchall()
+    con.executemany("INSERT INTO nfts(rowid, body) VALUES(?,?)", [(r[0], normalize(r[1])) for r in rows])
     con.commit()

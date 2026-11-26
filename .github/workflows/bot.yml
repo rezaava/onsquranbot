@@ -43,24 +43,24 @@ jobs:
             python -m importers.mafatih_v2
           else
             echo "Database exists, checking schema..."
-            python -c '
-import sqlite3
-con = sqlite3.connect("data/islamic.db")
-try:
-    con.execute("SELECT 1 FROM nfts LIMIT 1")
-    print("Schema OK")
-except sqlite3.OperationalError:
-    print("Missing nfts table, rebuilding...")
-    from core import db
-    db.rebuild_fts(con)
-    print("Schema updated")
-' || {
+            python << 'PYEOF' || {
               echo "Schema check failed, rebuilding database..."
               rm -f data/islamic.db
               python -m importers.quran
               python -m importers.nahj
               python -m importers.mafatih_v2
             }
+          import sqlite3
+          con = sqlite3.connect("data/islamic.db")
+          try:
+              con.execute("SELECT 1 FROM nfts LIMIT 1")
+              print("Schema OK")
+          except sqlite3.OperationalError:
+              print("Missing nfts table, rebuilding...")
+              from core import db
+              db.rebuild_fts(con)
+              print("Schema updated")
+          PYEOF
           fi
 
       - name: Run bot

@@ -550,6 +550,14 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     qi = uniq(lib.search(t, "quran", limit=40), 5)
     ni = uniq(lib.search(t, "nahj", limit=40), 3)
     mi = uniq(lib.search(t, "mafatih", limit=40), 3)
+    nq = lib.normalize(t)
+    mt = []
+    for x in lib.list_groups("mafatih"):
+        if nq and nq in lib.normalize(x["group_title"]):
+            mt.append({"group_no": x["group_no"], "group_title": x["group_title"], "snip": "", "item_no": 1})
+    mt = mt[:8]
+    have = {r["group_no"] for r in mt}
+    mi = mt + [r for r in mi if r["group_no"] not in have][:3]
     if not qi and not ni and not mi:
         return await update.message.reply_text("🔍 نتیجه‌ای پیدا نشد. کلمه‌ی دیگری امتحان کنید.",
                                                reply_markup=KB([[B("🏠 منو", callback_data="m")]]))
@@ -591,7 +599,7 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         text += "🤲 <b>مفاتیح‌الجنان</b>\n"
         for r in mi:
             ti = r["group_title"].split("·")[-1].strip() or f"بخش {r['group_no']}"
-            text += f"▪️ <i>{html.escape(ti[:60])}</i>\n{hl(r)}\n\n"
+            text += f"▪️ <i>{html.escape(ti[:60])}</i>\n{hl(r) if r['snip'] else ''}\n"
             rows.append([B(f"🤲 {ti[:50]}", callback_data=f"mv:{r['group_no']}:0")])
     rows.append([B("🏠 منو", callback_data="m")])
     await update.message.reply_text(text[:4000], reply_markup=KB(rows), parse_mode=ParseMode.HTML)

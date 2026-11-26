@@ -1,5 +1,5 @@
 name: Telegram Bot
-on: 
+on:
   push:
     branches: [main]
   workflow_dispatch:
@@ -43,18 +43,18 @@ jobs:
             python -m importers.mafatih_v2
           else
             echo "Database exists, checking schema..."
-            python -c "
+            python -c '
 import sqlite3
-con = sqlite3.connect('data/islamic.db')
+con = sqlite3.connect("data/islamic.db")
 try:
-    con.execute('SELECT 1 FROM nfts LIMIT 1')
-    print('Schema OK')
+    con.execute("SELECT 1 FROM nfts LIMIT 1")
+    print("Schema OK")
 except sqlite3.OperationalError:
-    print('Missing nfts table, rebuilding...')
+    print("Missing nfts table, rebuilding...")
     from core import db
     db.rebuild_fts(con)
-    print('Schema updated')
-" || {
+    print("Schema updated")
+' || {
               echo "Schema check failed, rebuilding database..."
               rm -f data/islamic.db
               python -m importers.quran

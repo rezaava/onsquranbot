@@ -63,15 +63,13 @@ def get_group(book_slug, group_no, offset=0, limit=10, translators=None):
     return [{**dict(r), "book": book_slug, **_texts(con, r["id"], translators)} for r in rows]
 
 
-def search(query, book_slug=None, lang=None, limit=20):
-    """Full-text search over all books (or one)."""
+def search(query, book_slug=None, lang=None, limit=20, exact=False):
+    """Full-text search over all books (or one). exact=True matches whole words only."""
     con = db.connect()
     ws = [w for w in re.findall(r"\w+", normalize(query)) if w]
     if not ws:
         return []
-    q = " ".join(f'"{w}"' for w in ws[:-1] + [ws[-1]]) 
-    q = q + "*" if q.endswith('"') else q
-    q = q[:-2] + '"*' if q.endswith('""*') else q
+    q = " ".join(f'"{w}"' if exact else f'"{w}"*' for w in ws)
     sql = ("SELECT b.slug,e.group_no,e.group_title,e.item_no,t.translator,t.lang,"
            "snippet(nfts,0,'[[HL]]','[[/HL]]','…',12) snip "
            "FROM nfts JOIN texts t ON t.id=nfts.rowid JOIN entries e ON e.id=t.entry_id "
@@ -81,5 +79,5 @@ def search(query, book_slug=None, lang=None, limit=20):
         sql, args = sql + " AND b.slug=?", args + [book_slug]
     if lang:
         sql, args = sql + " AND t.lang=?", args + [lang]
-    sql += " ORDER BY rank LIMIT ?"
+    sql += " ORDER BY rank, b.id, e.group_no, e.item_no LIMIT ?"
     return [dict(r) for r in con.execute(sql, args + [limit])]
